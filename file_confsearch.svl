@@ -1,0 +1,247 @@
+#svl
+//	file_confsearch.svl 	Conformational search on files
+//
+//	08-feb-2018 (bs) 	added options for potential setup
+//	31-jan-2018 (bs, gk) 	created
+//
+//
+// COPYRIGHT (C) 2017 CHEMICAL COMPUTING GROUP ULC ("CCG").
+// ALL RIGHTS RESERVED.
+//
+// PERMISSION TO USE, COPY, MODIFY AND DISTRIBUTE THIS SOFTWARE IS HEREBY 
+// GRANTED PROVIDED THAT: (1) UNMODIFIED OR FUNCTIONALLY EQUIVALENT SOFTWARE 
+// DERIVED FROM THIS SOFTWARE MUST CONTAIN THIS NOTICE; (2) ALL CODE DERIVED 
+// FROM THIS SOFTWARE MUST ACKNOWLEDGE THE AUTHOR(S) AND INSTITUTION(S); (3) 
+// THE NAMES OF THE AUTHOR(S) AND INSTITUTION(S) NOT BE USED IN ADVERTISING 
+// OR PUBLICITY PERTAINING TO THIS SOFTWARE WITHOUT SPECIFIC WRITTEN PRIOR 
+// PERMISSION; (4) ALL CODE DERIVED FROM THIS SOFTWARE BE EXECUTED WITH THE 
+// MOLECULAR OPERATING ENVIRONMENT LICENSED FROM CCG.
+//
+// CCG DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING 
+// ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, AND IN NO EVENT 
+// SHALL CCG BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR 
+// ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER 
+// IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT 
+// OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+/*
+  DESCRIPTION:
+  
+  Reads in files of types sdf, smiles or pdb, generates conformations and writes
+  them out as sdf or mdb files.
+
+
+  INSTALLATION:
+
+  1. Copy this file to $HOME/moefiles/svl, where $HOME is the user’s home 
+     directory (e.g.,Windows: C:Userswaltermoefilessvl or Linux/Unix/macOS: 
+     ~/moefiles/svl/)
+
+  2. Restart MOE to load the new file
+
+  Notes:
+  - The directory must be created if it does not already exist.
+  - $HOME can be determined at the SVL Commands windows. Type:
+  svl> HOME
+
+
+  USAGE:
+
+	1.  Save and load this function (see Installation)
+	2.  At the SVL command line prompt type the following
+
+	svl>  file_confsearch [infile, in_format, outfile, out_format, opt]
+
+	where,
+
+	files is: 
+
+	    infile:		name of the input file,
+	    in_format: 		'smiles', 'sdf', 'pdb',
+	    outfile:		name of the output file,
+	    out_format: 	'sdf', 'mdb'
+	
+	opt is a tagged vector. Tags are:
+
+	 Conformational Search:
+	    rot_amide : 	0, 
+	    rot_double : 	1, 
+	    invert_sp3 : 	0, 
+	    chair_only : 	1, 
+	    pot_charge : 	1, 
+	    method : 		'LowModeMD', 
+	    rigid : 		0, 
+	    rigid_mode : 	'Tag', 
+	    rigidHOH :	 	0, 
+	    rigidOH : 		0, 
+	    maxfail : 		100, 
+	    maxit : 		10000, 
+	    maxconf : 		250, 
+	    gtest : 		0.005, 
+	    mm_maxit : 		500, 
+	    cutoff : 		7, 	
+	    cutoff_chi : 	1, 
+	    rmsd : 		0.25, 
+	    rmsd_H : 		0, 
+	    free_shape : 	0, 
+	    useQM : 		0
+        
+	 SMILES input:
+		titles:		set to 0 if the first line of the smiles file is NOT a title,
+				default:1
+		delimiter	delimiter in smiles file, 
+				default: ','
+	Potential Setup:	
+		solDielectric:	80
+		eleEnable:	1
+
+  EXAMPLE:
+
+	svl> files_confsearch ['tarceva.sdf', 'sdf', 'tarceva_conf.mdb', 'mdb']
+	svl> files_confsearch ['tarceva.smi', 'smiles', 'tarceva_conf.sdf', 'sdf', 
+		[maxconf: 20, cutoff: 5, delimiter: '.']]
+
+
+  MOEBATCH:
+
+	moebatch -exec "file_confsearch [files, opt]"
+
+      
+*/
+
+
+function db_ImportSD, db_ExportSD, ConfSearch, db_ImportASCII;
+
+const CONF_DEFAULTS = [
+
+    outfile : '', 
+    dbappend: 0,
+    rot_amide : 0, 
+    rot_double : 1, 
+    invert_sp3 : 0, 
+    chair_only : 1, 
+    pot_charge : 1, 
+    method : 'LowModeMD', 
+    rigid : 0, 
+    rigid_mode : 'Tag', 
+    rigidHOH : 0, 
+    rigidOH : 0, 
+    maxfail : 100, 
+    maxit : 10000, 
+    maxconf : 250, 
+    gtest : 0.005, 
+    mm_maxit : 500, 
+    cutoff : 7, 
+    cutoff_chi : 1, 
+    rmsd : 0.25, 
+    rmsd_H : 0, 
+    free_shape : 0, 
+    useQM : 0
+
+];
+
+const SMI_DEFAULTS = [
+    titles: 	1,
+    delimiter: ','
+
+];
+
+const POT_DEFAULTS = [
+    solDielectric:	80,
+    eleEnable:		1
+];
+
+global function file_confsearch [infile, in_format, outfile, out_format, opt]
+
+    Close [force: 1];
+
+//potential setup
+
+    local pot_opt = tagcat [opt, POT_DEFAULTS];
+    pot_opt = pot_opt | m_join [tags pot_opt, tags POT_DEFAULTS];
+
+    pot_Load '$MOE/lib/Amber10EHT.ff'; 
+    pot_Setup [solDielectric: pot_opt.solDielectric, eleEnable: pot_opt.eleEnable];
+
+    local conf_opt = tagcat [opt, CONF_DEFAULTS];
+
+// create temporary mdb for input data
+
+    local mdbfile = fnametemp [];
+    db_Close db_Open [mdbfile, 'create'];
+
+// input operations dependent on input format
+
+    if in_format === 'smiles' then
+
+	local import_opt = tagcat [opt, SMI_DEFAULTS];
+
+	db_ImportASCII [
+	    ascii_file:	infile, 
+	    db_file:	mdbfile, 
+	    delimiter:	import_opt.delimiter,
+	    quotes:	0,
+	    names:	'mol', 
+	    types:	'molecule',
+	    skip:	0,
+	    titles:	import_opt.titles,
+	    do_emin:	0,
+	    append:	0
+	];
+
+    elseif in_format === 'sdf' then
+	
+	db_ImportSD [mdbfile, infile, 'mol'];
+    
+    elseif in_format === 'pdb' then
+	
+ 	Open infile;
+	db_CreateField [mdbfile, 'mol', 'molecule'];
+	db_Write [mdbfile, 0, [mol: mol_Extract Chains[]]];
+ 	oDestroy Chains [];
+
+    endif
+
+// create temporary mdb for output data
+
+   local tempfile = fnametemp [];
+
+   conf_opt = tagcat [
+	[outfile : tempfile, dbappend: ftype tempfile === 'file'], conf_opt];
+
+// do conformational search on mdb or on chains in MOE
+
+    local ent = 0, mol, chains;
+    local mdbkey = db_Open [mdbfile, 'read'];
+    while ent = db_NextEntry [mdbkey, ent] loop
+	
+	mol = cat db_ReadFields [mdbkey, ent, 'mol'];
+	chains = mol_Create mol;
+       
+	conf_opt = conf_opt | m_join [tags conf_opt, tags CONF_DEFAULTS];
+        ConfSearch conf_opt;
+	
+	oDestroy chains;
+
+    endloop
+
+    db_Close mdbkey;
+
+
+// export
+
+    if out_format === 'sdf' then
+
+	db_ExportSD [tempfile, outfile];
+
+    elseif out_format === 'mdb' then
+	
+	fcopy [tempfile, outfile];
+
+    endif
+
+    _fdelete tempfile;
+
+endfunction
+
+

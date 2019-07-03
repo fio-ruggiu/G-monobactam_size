@@ -1,0 +1,2 @@
+Conf_nb,dipole_moment_magnitude,Bool_min_dim,min_area,min_theta,min_area_theta, min_area_x,min_area_y,min_area_z,min_theta_area,min_theta_x,min_theta_y,min_theta_z
+1,4.20,1,100.622,3.452,128.493,11.537,8.722,15.617,115.928,12.915,8.976,15.674
